@@ -77,3 +77,31 @@ async def query_models_parallel(
 
     # Map models to their responses
     return {model: response for model, response in zip(models, responses)}
+
+
+async def query_models_sequential(
+    models: List[str],
+    messages: List[Dict[str, str]]
+) -> Dict[str, Optional[Dict[str, Any]]]:
+    """
+    Query multiple models sequentially (one after another).
+
+    Args:
+        models: List of OpenRouter model identifiers
+        messages: List of message dicts to send to each model
+
+    Returns:
+        Dict mapping model identifier to response dict (or None if failed)
+    """
+    import asyncio
+    
+    responses = {}
+
+    # Query each model sequentially
+    for model in models:
+        response = await query_model(model, messages)
+        responses[model] = response
+        # Pause for 1 second between queries
+        await asyncio.sleep(1)
+
+    return responses

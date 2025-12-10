@@ -9,6 +9,7 @@ function App() {
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [currentConversation, setCurrentConversation] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [copilotStatus, setCopilotStatus] = useState({ authenticated: false, available_models: [] });
 
   // Load conversations on mount
   useEffect(() => {
@@ -59,6 +60,12 @@ function App() {
 
   const handleSendMessage = async (content) => {
     if (!currentConversationId) return;
+
+    // Check if Copilot is authenticated before allowing messages
+    if (!copilotStatus.authenticated) {
+      console.error('Copilot is not authenticated. Please connect first.');
+      return;
+    }
 
     setIsLoading(true);
     try {
@@ -188,11 +195,13 @@ function App() {
         currentConversationId={currentConversationId}
         onSelectConversation={handleSelectConversation}
         onNewConversation={handleNewConversation}
+        onCopilotStatusChange={setCopilotStatus}
       />
       <ChatInterface
         conversation={currentConversation}
         onSendMessage={handleSendMessage}
         isLoading={isLoading}
+        copilotAuthenticated={copilotStatus.authenticated}
       />
     </div>
   );

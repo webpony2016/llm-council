@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import CopilotAuth from './CopilotAuth';
 import './Sidebar.css';
 
 export default function Sidebar({
@@ -6,6 +7,7 @@ export default function Sidebar({
   currentConversationId,
   onSelectConversation,
   onNewConversation,
+  onCopilotStatusChange,
 }) {
   return (
     <div className="sidebar">
@@ -15,6 +17,8 @@ export default function Sidebar({
           + New Conversation
         </button>
       </div>
+
+      <CopilotAuth onStatusChange={onCopilotStatusChange} />
 
       <div className="conversation-list">
         {conversations.length === 0 ? (

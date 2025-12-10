@@ -4,13 +4,16 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import uuid
 import json
 import asyncio
 
 from . import storage
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
+from .copilot import copilot_service, COPILOT_MODELS
+from .providers import provider_registry
+from .config import COUNCIL_MODELS, COPILOT_MODELS as CONFIG_COPILOT_MODELS, OPENROUTER_MODELS
 
 app = FastAPI(title="LLM Council API")
 
@@ -50,10 +53,128 @@ class Conversation(BaseModel):
     messages: List[Dict[str, Any]]
 
 
+class CopilotDeviceCodeResponse(BaseModel):
+    """Response from Copilot device code request."""
+    device_code: str
+    user_code: str
+    verification_uri: str
+    expires_in: int
+    interval: int
+
+
+class CopilotPollRequest(BaseModel):
+    """Request to poll for Copilot access token."""
+    device_code: str
+
+
+class CopilotStatusResponse(BaseModel):
+    """Response with Copilot authentication status."""
+    authenticated: bool
+    available_models: List[str]
+
+
 @app.get("/")
 async def root():
     """Health check endpoint."""
     return {"status": "ok", "service": "LLM Council API"}
+
+
+# ==================== Copilot Authentication Endpoints ====================
+
+@app.get("/api/copilot/status", response_model=CopilotStatusResponse)
+async def copilot_status():
+    """Check Copilot authentication status."""
+    authenticated = copilot_service.is_authenticated()
+    return {
+        "authenticated": authenticated,
+        "available_models": COPILOT_MODELS if authenticated else []
+    }
+
+
+@app.post("/api/copilot/auth", response_model=CopilotDeviceCodeResponse)
+async def copilot_auth():
+    """
+    Start Copilot OAuth device flow.
+    Returns device_code and user_code for user to authorize.
+    """
+    try:
+        result = await copilot_service.get_device_code()
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start auth flow: {str(e)}")
+
+
+@app.post("/api/copilot/token")
+async def copilot_poll_token(request: CopilotPollRequest):
+    """
+    Poll for Copilot access token after user authorizes.
+    This endpoint will wait until the user authorizes or timeout.
+    """
+    try:
+        access_token = await copilot_service.poll_for_access_token(
+            request.device_code,
+            interval=5,
+            max_attempts=24  # 2 minutes max
+        )
+        if access_token:
+            return {"success": True, "message": "Authentication successful"}
+        else:
+            return {"success": False, "message": "Authentication failed or expired"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get token: {str(e)}")
+
+
+@app.post("/api/copilot/logout")
+async def copilot_logout():
+    """Clear Copilot authentication."""
+    copilot_service.clear_token()
+    return {"success": True, "message": "Logged out successfully"}
+
+
+# ==================== Provider & Model Endpoints ====================
+
+@app.get("/api/providers")
+async def list_providers():
+    """List all available providers and their status."""
+    providers = []
+    for name in provider_registry.list_providers():
+        provider = provider_registry.get(name)
+        if provider:
+            providers.append({
+                "name": name,
+                "available": provider.is_available(),
+                "models": provider.supported_models if provider.is_available() else []
+            })
+    return providers
+
+
+@app.get("/api/models")
+async def list_models():
+    """List all available models across all providers."""
+    models = []
+    for name in provider_registry.list_available_providers():
+        provider = provider_registry.get(name)
+        if provider:
+            for model in provider.supported_models:
+                models.append({
+                    "id": f"{name}/{model}" if name != "openrouter" else model,
+                    "provider": name,
+                    "name": model
+                })
+    return models
+
+
+@app.get("/api/council/config")
+async def get_council_config():
+    """Get current council configuration."""
+    return {
+        "council_models": COUNCIL_MODELS,
+        "copilot_models": CONFIG_COPILOT_MODELS,
+        "openrouter_models": OPENROUTER_MODELS,
+    }
+
+
+# ==================== Conversation Endpoints ====================
 
 
 @app.get("/api/conversations", response_model=List[ConversationMetadata])
